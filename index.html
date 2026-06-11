@@ -14,6 +14,17 @@
     <link rel="stylesheet" href="plugins/ol/ol.css">
     <script src="plugins/tailwind/tailwind.js"></script>
     <script src="plugins/tailwind/david-ai.min.js"></script>
+    <style>
+        .ol-mouse-position {
+            top: 8px;
+            right: 8px;
+            background: rgba(255, 255, 255, 0.85);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #334155;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
     <div class="container mx-auto p-4">
@@ -21,14 +32,14 @@
             <div class="w-full max-w-8xl bg-white p-3 shadow-md rounded-lg">
                 <div class="relative tab-group">
                     <div class="flex bg-stone-100 p-0.5 relative rounded-lg justify-center" role="tablist">
-                        <div class="absolute top-1 left-0 right-0 translate-x-0 h-8 bg-white rounded-md shadow-sm transition-all duration-300 transform tab-indicator z-0"></div>
-                        <button class="tab-link font-semibold text-sm active inline-block py-2 px-4 text-stone-800 transition-all duration-300 relative z-1 mr-1 cursor-pointer" data-dui-tab-target="map-tab">
+                        <div class="absolute top-0.5 bottom-0.5 left-0 right-0 translate-x-0 bg-white rounded-md shadow-sm transition-all duration-300 transform tab-indicator z-0"></div>
+                        <button class="tab-link font-semibold text-xs sm:text-sm active inline-block py-2 px-2.5 sm:px-4 text-stone-800 transition-all duration-300 relative z-1 mr-1 cursor-pointer" data-dui-tab-target="map-tab">
                             Geometry Extractor
                         </button>
-                        <button class="tab-link font-semibold text-sm inline-block py-2 px-4 text-stone-800 transition-all duration-300 relative z-1 mr-1 cursor-pointer" data-dui-tab-target="geometry-tab">
+                        <button class="tab-link font-semibold text-xs sm:text-sm inline-block py-2 px-2.5 sm:px-4 text-stone-800 transition-all duration-300 relative z-1 mr-1 cursor-pointer" data-dui-tab-target="geometry-tab">
                             Geometry Viewer
                         </button>
-                        <button class="tab-link font-semibold text-sm inline-block py-2 px-4 text-stone-800 transition-all duration-300 relative z-1 mr-1 cursor-pointer" data-dui-tab-target="converter-tab">
+                        <button class="tab-link font-semibold text-xs sm:text-sm inline-block py-2 px-2.5 sm:px-4 text-stone-800 transition-all duration-300 relative z-1 mr-1 cursor-pointer" data-dui-tab-target="converter-tab">
                             Coordinate Converter
                         </button>
                     </div>
@@ -36,6 +47,12 @@
                         <div id="map-tab" class="tab-content text-stone-500 text-sm block px-1">
                             <div class="w-full bg-white shadow-md rounded-lg relative">
                                 <div id="extractor-map" class="h-150 w-full border rounded"></div>
+                                <div id="map-search" class="absolute top-2 left-12 z-10 w-64 max-w-[55%]">
+                                    <input id="map-search-input" type="text" placeholder="Search location..." autocomplete="off"
+                                           aria-label="Search location"
+                                           class="w-full bg-white/95 text-sm text-slate-700 border border-slate-300 rounded-md px-3 py-1.5 shadow focus:outline-none focus:border-slate-500">
+                                    <ul id="map-search-results" class="hidden mt-1 bg-white border border-slate-200 rounded-md shadow-lg overflow-hidden text-sm text-slate-700"></ul>
+                                </div>
                                 <button class="clear-map rounded-md bg-slate-800 py-2 px-4 border border-transparent text-center text-sm text-white transition-all shadow-md hover:shadow-lg focus:bg-slate-700 focus:shadow-none active:bg-slate-700 hover:bg-slate-700 active:shadow-none disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none cursor-pointer"
                                         type="button">
                                     Clear
@@ -55,6 +72,7 @@
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.2" stroke="currentColor" class="h-5 w-5 ml-1 absolute top-10.5 right-2.5 text-slate-700">
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 15 12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"/>
                                         </svg>
+                                        <p class="text-xs text-slate-400 mt-1.5">Esc cancels · Backspace removes last point · drag vertices to edit</p>
                                     </div>
                                 </div>
                                 <div class="flex-1">
@@ -63,6 +81,7 @@
                                         <select id="export-type" class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none cursor-pointer">
                                             <option value="array" selected> Array </option>
                                             <option value="wkt"> WKT </option>
+                                            <option value="geojson"> GeoJSON </option>
                                         </select>
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.2" stroke="currentColor" class="h-5 w-5 ml-1 absolute top-10.5 right-2.5 text-slate-700">
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 15 12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"/>
@@ -96,15 +115,17 @@
                                     <label class="block text-lg text-[#1C274C] font-bold mb-1" for="input-geometry"> Enter Geometry </label>
                                     <textarea id="input-geometry"
                                               class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none"
-                                              placeholder="Enter Geometry" rows="5"></textarea>
+                                              placeholder="Paste WKT, GeoJSON, or a coordinate array — format and projection are auto-detected" rows="5"></textarea>
                                 </div>
                                 <div class="flex-2">
                                     <div class="relative">
                                         <label class="block text-lg text-[#1C274C] font-bold mb-1" for="viewer-type-selector"> Input Type </label>
                                         <select id="viewer-type-selector"
                                                 class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none cursor-pointer">
+                                            <option value="auto" selected> Auto Detect </option>
                                             <option value="array"> Array </option>
                                             <option value="wkt"> WKT </option>
+                                            <option value="geojson"> GeoJSON </option>
                                         </select>
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.2"
                                              stroke="currentColor" class="h-5 w-5 ml-1 absolute top-10.5 right-2.5 text-slate-700">
@@ -116,7 +137,8 @@
                                         <label class="block text-lg text-[#1C274C] font-bold mb-1" for="viewer-projection-selector"> Input Projection </label>
                                         <select id="viewer-projection-selector"
                                                 class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none cursor-pointer">
-                                            <option value="EPSG:3857" selected> EPSG:3857 (Web Mercator) </option>
+                                            <option value="auto" selected> Auto Detect </option>
+                                            <option value="EPSG:3857"> EPSG:3857 (Web Mercator) </option>
                                             <option value="EPSG:4326"> EPSG:4326 (WGS 84) </option>
                                         </select>
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.2"
@@ -141,14 +163,15 @@
                                     <label class="block text-lg text-[#1C274C] font-bold mb-1" for="input-coordinates"> Enter Coordinates </label>
                                     <input type="text" id="input-coordinates"
                                            class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none"
-                                           placeholder="3857 X, Y or 4326 Longitude, Latitude">
+                                           placeholder="X, Y or Longitude, Latitude — press Enter to convert">
                                 </div>
                                 <div class="flex-2">
                                     <div class="relative">
                                         <label class="block text-lg text-[#1C274C] font-bold mb-1" for="projection-selector"> Input Projection </label>
                                         <select id="projection-selector"
                                                 class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none cursor-pointer">
-                                            <option value="EPSG:3857" selected> EPSG:3857 (Web Mercator) </option>
+                                            <option value="auto" selected> Auto Detect </option>
+                                            <option value="EPSG:3857"> EPSG:3857 (Web Mercator) </option>
                                             <option value="EPSG:4326"> EPSG:4326 (WGS 84) </option>
                                         </select>
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.2"
@@ -168,6 +191,9 @@
                                 <p>
                                     <strong class="text-[#1C274C]"> EPSG:4326(lng, lat): </strong>
                                     <code class="bg-gray-200 px-2 py-1 rounded"> 51.338063171, 35.699738067 </code>
+                                </p>
+                                <p class="mt-3 text-slate-400 text-xs">
+                                    Integers and decimals are both accepted. With Auto Detect, values within ±180 / ±90 are treated as EPSG:4326.
                                 </p>
                             </div>
                             <div class="flex justify-center">
@@ -210,293 +236,6 @@
     <script src="plugins/ol/ol.js"></script>
     <script src="plugins/jquery-3.7.1.min.js"></script>
     <script src="plugins/proj/proj4.js"></script>
-    <script>
-        const inputError = $('#input-error');
-        const outputSection = $('#output-section');
-        const output = $('#output');
-        const extractorSource = new ol.source.Vector();
-        const viewerSource = new ol.source.Vector();
-        $('.tab-link').on('click', function () {
-            inputError.hide();
-            outputSection.hide();
-            extractorSource.clear();
-            viewerSource.clear();
-        });
-        $('.clear-map').click(function () {
-            extractorSource.clear();
-            viewerSource.clear();
-            outputSection.hide();
-        });
-
-        function copyToClipboard(button) {
-            const code = button.nextElementSibling.innerText;
-            navigator.clipboard.writeText(code).then(() => {
-                button.innerText = 'Copied!';
-                setTimeout(() => button.innerText = 'Copy', 1500);
-            });
-        }
-
-        $(document).ready(function () {
-            initExtractorMap();
-            initViewerMap();
-        });
-
-        function initExtractorMap () {
-            const map = new ol.Map({
-                target: 'extractor-map',
-                layers: [
-                    new ol.layer.Tile({
-                        source: new ol.source.OSM()
-                    })
-                ],
-                view: new ol.View({
-                    center: ol.proj.fromLonLat([53.584972499936065, 32.24674047057724]),
-                    zoom: 5,
-                    extent: ol.proj.get('EPSG:3857').getExtent()
-                })
-            });
-            const vectorLayer = new ol.layer.Vector({
-                source: extractorSource,
-                style: new ol.style.Style({
-                    fill: new ol.style.Fill({ color: 'rgba(71,65,65,0.2)' }),
-                    stroke: new ol.style.Stroke({ color: '#1C274C', width: 2 }),
-                    image: new ol.style.Circle({
-                        radius: 5,
-                        fill: new ol.style.Fill({ color: '#1C274C' })
-                    })
-                })
-            });
-            map.addLayer(vectorLayer);
-
-            let draw = 'Point';
-            addDrawInteraction(draw);
-            const wktFormat = new ol.format.WKT();
-            const drawTypeSelector = document.getElementById("draw-type-selector");
-            const projectionSelector = document.getElementById("map-projection");
-            const exportTypeSelector = document.getElementById("export-type");
-
-            drawTypeSelector.addEventListener("change", function () {
-                if (draw) {
-                    map.removeInteraction(draw);
-                }
-                addDrawInteraction(drawTypeSelector.value);
-            });
-            projectionSelector.addEventListener("change", () => {
-                if (lastDrawnFeature) {
-                    updateOutput(drawTypeSelector.value, lastDrawnFeature);
-                }
-            });
-            exportTypeSelector.addEventListener("change", () => {
-                if (lastDrawnFeature) {
-                    updateOutput(drawTypeSelector.value, lastDrawnFeature);
-                }
-            });
-
-            let lastDrawnFeature = null;
-            function addDrawInteraction(drawType) {
-                draw = new ol.interaction.Draw({
-                    source: extractorSource,
-                    type: drawType === 'BBox' ? 'Polygon' : drawType
-                });
-                map.addInteraction(draw);
-                draw.on('drawend', function (event) {
-                    extractorSource.clear();
-                    outputSection.show();
-                    lastDrawnFeature = event.feature;
-                    if (drawType === 'BBox') {
-                        const extent = lastDrawnFeature.getGeometry().getExtent();
-                        lastDrawnFeature = new ol.Feature(ol.geom.Polygon.fromExtent(extent));
-                        lastDrawnFeature.setStyle(new ol.style.Style({
-                            stroke: new ol.style.Stroke({
-                                color: 'red',
-                                width: 2,
-                                lineDash: [6, 4]
-                            }),
-                            fill: new ol.style.Fill({
-                                color: 'rgba(255, 0, 0, 0.1)'
-                            })
-                        }));
-                        extractorSource.addFeature(lastDrawnFeature);
-                    }
-                    updateOutput(drawType, lastDrawnFeature);
-                });
-            }
-
-            function updateOutput(drawType, feature) {
-                const selectedProjection = projectionSelector.value;
-                const exportType = exportTypeSelector.value;
-                let coords = feature.getGeometry().getCoordinates();
-                coords = transformCoordinates(coords, drawType, selectedProjection);
-
-                let content = '';
-                if (exportType === 'array') {
-                    const coordString = JSON.stringify(coords, null, 2).replaceAll(/(\d),\n\s*(\d)/g, '$1, $2');
-                    content = `<code class="language-json">${coordString}</code>`;
-                } else if (exportType === 'wkt') {
-                    let newFeature = feature.clone();
-                    newFeature.getGeometry().setCoordinates(coords);
-                    const wkt = wktFormat.writeFeature(newFeature).replaceAll(',', ',\n');
-                    content = `<code class="language-wkt">${wkt}</code>`;
-                }
-
-                output.html(`
-                    <h3 class="text-xl text-[#1C274C] font-bold mb-1">Drawn Geometry (${drawType} in ${selectedProjection})</h3>
-                    <div class="relative group mt-2">
-                        <button onclick="copyToClipboard(this)" class="absolute right-2 top-2 group-hover:block text-sm bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border">
-                            Copy
-                        </button>
-                        <pre class="bg-gray-100 p-4 rounded overflow-auto">${content}</pre>
-                    </div>
-                `);
-            }
-
-            function transformCoordinates(coords, geometryType, targetProjection) {
-                if (geometryType === "Point") {
-                    return ol.proj.transform(coords, "EPSG:3857", targetProjection);
-                } else if (geometryType === "LineString") {
-                    return coords.map(coord => ol.proj.transform(coord, "EPSG:3857", targetProjection));
-                } else if (geometryType === "Polygon" || geometryType === "BBox") {
-                    return coords.map(ring => {
-                        return ring.map(coord => ol.proj.transform(coord, "EPSG:3857", targetProjection));
-                    });
-                }
-                return coords;
-            }
-        }
-
-        function initViewerMap () {
-            const map = new ol.Map({
-                target: 'viewer-map',
-                layers: [
-                    new ol.layer.Tile({
-                        source: new ol.source.OSM()
-                    })
-                ],
-                view: new ol.View({
-                    center: ol.proj.fromLonLat([53.584972499936065, 32.24674047057724]),
-                    zoom: 5,
-                    extent: ol.proj.get('EPSG:3857').getExtent()
-                })
-            });
-            const vectorLayer = new ol.layer.Vector({
-                source: viewerSource,
-                style: new ol.style.Style({
-                    fill: new ol.style.Fill({ color: 'rgba(71,65,65,0.2)' }),
-                    stroke: new ol.style.Stroke({ color: '#1C274C', width: 2 }),
-                    image: new ol.style.Circle({
-                        radius: 5,
-                        fill: new ol.style.Fill({ color: '#1C274C' })
-                    })
-                })
-            });
-            map.addLayer(vectorLayer);
-
-            $('#show-viewer-map').click(function () {
-                const geometry = $('#input-geometry').val();
-                const geometryType = $('#viewer-type-selector').val();
-                const dataProjection = $('#viewer-projection-selector').val();
-
-                inputError.hide();
-                try {
-                    switch (geometryType) {
-                        case 'wkt':
-                            showWKT(geometry, dataProjection);
-                            break;
-                        case 'array':
-                            showArray(geometry, dataProjection);
-                            break;
-                    }
-                } catch (e) {
-                    inputError.show();
-                    console.error(e);
-                    inputError.html(`
-                        <span class="font-semibold"> Error: </span> Please enter valid geometry!
-                    `);
-                }
-            });
-
-            const wktFormat = new ol.format.WKT();
-            function showWKT(geometry, dataProjection) {
-                const feature = wktFormat.readFeature(geometry, {
-                    dataProjection: dataProjection,
-                    featureProjection: map.getView().getProjection()
-                });
-                viewerSource.clear();
-                viewerSource.addFeature(feature);
-                map.getView().fit(feature.getGeometry(), {
-                    padding: [50, 50, 50, 50]
-                });
-            }
-
-            function showArray(geometryString, dataProjection) {
-                let coordinates = JSON.parse(geometryString);
-                if (!Array.isArray(coordinates)) throw new Error('Not an array!');
-                let geometry;
-                if (typeof coordinates[0] === 'number') { // Point
-                    geometry = new ol.geom.Point(coordinates);
-                }
-                else if (typeof coordinates[0][0] === 'number') { // LineString
-                    geometry = new ol.geom.LineString(coordinates);
-                }
-                else if (typeof coordinates[0][0][0] === 'number') { // Polygon
-                    geometry = new ol.geom.Polygon(coordinates);
-                } else {
-                    throw new Error('Unsupported geometry format');
-                }
-                geometry.transform(dataProjection, map.getView().getProjection());
-                const feature = new ol.Feature(geometry);
-                viewerSource.clear();
-                viewerSource.addFeature(feature);
-                map.getView().fit(geometry, {
-                    padding: [50, 50, 50, 50]
-                });
-            }
-        }
-
-        $('#convert-button').click(function () {
-            const inputCoordinates = $('#input-coordinates').val().trim();
-            if (inputCoordinates === '') {
-                inputError.show();
-                inputError.html(`
-                    <span class="font-semibold"> Error: </span> Please enter valid coordinates!
-                `);
-                return;
-            }
-            inputError.hide();
-
-            let result;
-            const proj3857 = 'EPSG:3857';
-            const proj4326 = 'EPSG:4326';
-            const selectedProjection = $('#projection-selector').val();
-            if (selectedProjection === proj3857) {
-                const regex = /^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/;
-                const match = inputCoordinates.match(regex);
-                if (match) {
-                    const x = parseFloat(match[1]);
-                    const y = parseFloat(match[2]);
-                    result = proj4(proj3857, proj4326, [x, y]);
-                    output.html(`<h3 class="text-xl text-[#1C274C] font-bold mb-1">Converted to EPSG:4326</h3><b>Longitude:</b> ${result[0]}<br><b>Latitude:</b> ${result[1]}`);
-                    outputSection.show();
-                    return;
-                }
-            } else if (selectedProjection === proj4326) {
-                const regex = /^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/;
-                const match = inputCoordinates.match(regex);
-                if (match) {
-                    const lng = parseFloat(match[1]);
-                    const lat = parseFloat(match[2]);
-                    result = proj4(proj4326, proj3857, [lng, lat]);
-                    output.html(`<h3 class="text-xl text-[#1C274C] font-bold mb-1">Converted to EPSG:3857</h3><b>X:</b> ${result[0]}<br><b>Y:</b> ${result[1]}`);
-                    outputSection.show();
-                    return;
-                }
-            }
-            inputError.show();
-            inputError.html(`
-                <span class="font-semibold"> Error: </span> Please enter valid coordinates!
-            `);
-            outputSection.hide();
-        });
-    </script>
+    <script src="assets/app.js?v=5"></script>
 </body>
 </html>
