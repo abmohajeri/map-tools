@@ -112,10 +112,18 @@
                             </div>
                             <div class="flex space-x-6 mt-3">
                                 <div class="flex-4">
-                                    <label class="block text-lg text-[#1C274C] font-bold mb-1" for="input-geometry"> Enter Geometry </label>
+                                    <div class="flex items-center justify-between mb-1">
+                                        <label class="block text-lg text-[#1C274C] font-bold" for="input-geometry"> Enter Geometry </label>
+                                        <button id="import-geometry-btn" type="button"
+                                                class="text-xs font-medium text-slate-500 hover:text-slate-700 underline cursor-pointer">
+                                            Import file
+                                        </button>
+                                        <input id="import-geometry-file" type="file"
+                                               accept=".json,.geojson,.wkt,.txt,application/json,application/geo+json" class="hidden">
+                                    </div>
                                     <textarea id="input-geometry"
                                               class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none"
-                                              placeholder="Paste WKT, GeoJSON, or a coordinate array — format and projection are auto-detected" rows="5"></textarea>
+                                              placeholder="Paste WKT, GeoJSON, or a coordinate array — or drop a file here. Format and projection are auto-detected" rows="5"></textarea>
                                 </div>
                                 <div class="flex-2">
                                     <div class="relative">
@@ -236,6 +244,6 @@
     <script src="plugins/ol/ol.js"></script>
     <script src="plugins/jquery-3.7.1.min.js"></script>
     <script src="plugins/proj/proj4.js"></script>
-    <script src="assets/app.js?v=5"></script>
+    <script src="assets/app.js?v=6"></script>
 </body>
 </html>

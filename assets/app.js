@@ -76,11 +76,18 @@ $(function () {
         viewerSource.clear();
     }
 
-    // A <pre> block with a hover Copy button. `text` is escaped, so any
-    // user-supplied content (e.g. GeoJSON properties) renders inert.
-    function copyBlock(text, language) {
+    // A <pre> block with Copy and (optionally) Download buttons. `text` is
+    // escaped, so any user-supplied content (e.g. GeoJSON properties) renders
+    // inert. Passing `downloadName` adds a button that saves the block as a file.
+    function copyBlock(text, language, downloadName) {
+        const downloadBtn = downloadName
+            ? '<button class="download-btn text-sm bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border" ' +
+                'data-filename="' + escapeHtml(downloadName) + '">Download</button>'
+            : '';
         return '<div class="relative group mt-2">' +
-            '<button class="copy-btn absolute right-2 top-2 text-sm bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border">Copy</button>' +
+            '<div class="absolute right-2 top-2 flex gap-1">' + downloadBtn +
+            '<button class="copy-btn text-sm bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border">Copy</button>' +
+            '</div>' +
             '<pre class="bg-gray-100 p-4 rounded overflow-auto"><code class="language-' + language + '">' +
             escapeHtml(text) + '</code></pre></div>';
     }
@@ -103,6 +110,20 @@ $(function () {
                 ta.remove();
             }
         });
+    }
+
+    // Triggers a client-side download of `text` as a file named `filename`.
+    function downloadText(filename, text) {
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        // Revoke once the click has been processed so the download isn't cancelled.
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     }
 
     /* ----------------------------------------------------------------- *
@@ -282,10 +303,11 @@ $(function () {
      * Global wiring (copy buttons, tab switches, clear buttons)
      * ----------------------------------------------------------------- */
 
-    // The output (with its copy button) is rendered dynamically, so delegate.
+    // The output (with its copy/download buttons) is rendered dynamically, so delegate.
     $(document).on('click', '.copy-btn', function () {
         const button = this;
-        const text = button.nextElementSibling.innerText;
+        const code = button.closest('.group').querySelector('code');
+        const text = code ? code.innerText : '';
         copyText(text).then(function () {
             button.innerText = 'Copied!';
             setTimeout(function () { button.innerText = 'Copy'; }, 1500);
@@ -293,6 +315,12 @@ $(function () {
             button.innerText = 'Copy failed';
             setTimeout(function () { button.innerText = 'Copy'; }, 1500);
         });
+    });
+
+    $(document).on('click', '.download-btn', function () {
+        const code = this.closest('.group').querySelector('code');
+        if (!code) return;
+        downloadText(this.getAttribute('data-filename') || 'geometry.txt', code.innerText);
     });
 
     $('.tab-link').on('click', resetUI);
@@ -396,23 +424,26 @@ $(function () {
             const exportType = exportTypeSelector.value;
             const clones = transformedClones([lastFeature], targetProjection);
 
-            let text, language;
+            let text, language, filename;
             if (exportType === 'wkt') {
                 text = toWktText(clones);
                 language = 'wkt';
+                filename = 'geometry.wkt';
             } else if (exportType === 'geojson') {
                 text = toGeoJsonText(clones);
                 language = 'json';
+                filename = 'geometry.geojson';
             } else {
                 text = toArrayText(clones);
                 language = 'json';
+                filename = 'geometry.json';
             }
 
             showOutput(
                 '<h3 class="text-xl text-[#1C274C] font-bold mb-1">Drawn Geometry (' +
                     escapeHtml(lastType) + ' in ' + escapeHtml(targetProjection) + ')</h3>' +
                 statsRowHtml(lastFeature.getGeometry()) +
-                copyBlock(text, language)
+                copyBlock(text, language, filename)
             );
         }
 
@@ -541,9 +572,9 @@ $(function () {
             const clones = transformedClones(features, dataProjection);
             const blocks = [];
             const arrayText = toArrayText(clones);
-            if (arrayText) blocks.push({ label: 'Array', language: 'json', text: arrayText });
-            blocks.push({ label: 'WKT', language: 'wkt', text: toWktText(clones) });
-            blocks.push({ label: 'GeoJSON', language: 'json', text: toGeoJsonText(clones) });
+            if (arrayText) blocks.push({ label: 'Array', language: 'json', text: arrayText, filename: 'geometry.json' });
+            blocks.push({ label: 'WKT', language: 'wkt', text: toWktText(clones), filename: 'geometry.wkt' });
+            blocks.push({ label: 'GeoJSON', language: 'json', text: toGeoJsonText(clones), filename: 'geometry.geojson' });
 
             const shown = features.slice(0, 10);
             const statsHtml = shown.map(function (feature, i) {
@@ -562,7 +593,7 @@ $(function () {
                 statsHtml +
                 blocks.map(function (b) {
                     return '<h4 class="text-sm text-[#1C274C] font-bold mt-4">' + b.label + '</h4>' +
-                        copyBlock(b.text, b.language);
+                        copyBlock(b.text, b.language, b.filename);
                 }).join('')
             );
         }
@@ -605,6 +636,51 @@ $(function () {
                 console.error(e);
                 showError('Please enter valid geometry!');
             }
+        });
+
+        // --- File import (button picker + drag-and-drop) ----------------
+        // Reads a text file into the textarea and runs the viewer, reusing the
+        // same auto-detection path as pasted input.
+        const $geometryInput = $('#input-geometry');
+        const importFileInput = document.getElementById('import-geometry-file');
+
+        function importFile(file) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function () {
+                $geometryInput.val(String(reader.result).trim());
+                $('#show-viewer-map').trigger('click');
+            };
+            reader.onerror = function () { showError('Could not read that file.'); };
+            reader.readAsText(file);
+        }
+
+        // True only when the drag carries files (so we don't hijack text drags).
+        function dragHasFile(e) {
+            const dt = e.originalEvent && e.originalEvent.dataTransfer;
+            return !!dt && dt.types && Array.prototype.indexOf.call(dt.types, 'Files') !== -1;
+        }
+
+        $('#import-geometry-btn').on('click', function () { importFileInput.click(); });
+        $(importFileInput).on('change', function () {
+            if (this.files && this.files[0]) importFile(this.files[0]);
+            this.value = ''; // let the same file be re-imported later
+        });
+
+        $geometryInput.on('dragover dragenter', function (e) {
+            if (!dragHasFile(e)) return;
+            e.preventDefault();
+            $geometryInput.addClass('border-slate-500 bg-slate-50');
+        });
+        $geometryInput.on('dragleave dragend', function () {
+            $geometryInput.removeClass('border-slate-500 bg-slate-50');
+        });
+        $geometryInput.on('drop', function (e) {
+            $geometryInput.removeClass('border-slate-500 bg-slate-50');
+            if (!dragHasFile(e)) return;
+            e.preventDefault();
+            const dt = e.originalEvent.dataTransfer;
+            if (dt.files && dt.files[0]) importFile(dt.files[0]);
         });
 
         return { map: map, source: viewerSource };
