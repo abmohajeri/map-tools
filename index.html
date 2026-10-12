@@ -119,11 +119,13 @@
                                             Import file
                                         </button>
                                         <input id="import-geometry-file" type="file"
-                                               accept=".json,.geojson,.wkt,.txt,application/json,application/geo+json" class="hidden">
+                                               accept=".json,.geojson,.wkt,.wkb,.kml,.gpx,.txt,application/json,application/geo+json,application/vnd.google-earth.kml+xml,application/gpx+xml"
+                                               class="hidden">
                                     </div>
                                     <textarea id="input-geometry"
                                               class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none"
-                                              placeholder="Paste WKT, GeoJSON, or a coordinate array — or drop a file here. Format and projection are auto-detected" rows="5"></textarea>
+                                              placeholder="Paste WKT / EWKT, GeoJSON, WKB hex, KML, GPX, an encoded polyline, or a coordinate array / [xmin, ymin, xmax, ymax] bbox — or drop a file here. Format and projection are auto-detected"
+                                              rows="5"></textarea>
                                 </div>
                                 <div class="flex-2">
                                     <div class="relative">
@@ -132,8 +134,12 @@
                                                 class="w-full bg-transparent placeholder:text-slate-400 text-slate-700 text-sm border border-slate-200 rounded pl-3 pr-8 py-2 transition duration-300 ease focus:outline-none focus:border-slate-400 hover:border-slate-400 shadow-sm focus:shadow-md appearance-none cursor-pointer">
                                             <option value="auto" selected> Auto Detect </option>
                                             <option value="array"> Array </option>
-                                            <option value="wkt"> WKT </option>
+                                            <option value="wkt"> WKT / EWKT</option>
                                             <option value="geojson"> GeoJSON </option>
+                                            <option value="wkb"> WKB / EWKB (hex)</option>
+                                            <option value="kml"> KML</option>
+                                            <option value="gpx"> GPX</option>
+                                            <option value="polyline"> Encoded Polyline</option>
                                         </select>
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.2"
                                              stroke="currentColor" class="h-5 w-5 ml-1 absolute top-10.5 right-2.5 text-slate-700">
@@ -181,6 +187,8 @@
                                             <option value="auto" selected> Auto Detect </option>
                                             <option value="EPSG:3857"> EPSG:3857 (Web Mercator) </option>
                                             <option value="EPSG:4326"> EPSG:4326 (WGS 84) </option>
+                                            <option value="EPSG:4326:lat-lng"> EPSG:4326 (lat, lng — Google Maps)
+                                            </option>
                                         </select>
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.2"
                                              stroke="currentColor" class="h-5 w-5 ml-1 absolute top-10.5 right-2.5 text-slate-700">
@@ -200,8 +208,14 @@
                                     <strong class="text-[#1C274C]"> EPSG:4326(lng, lat): </strong>
                                     <code class="bg-gray-200 px-2 py-1 rounded"> 51.338063171, 35.699738067 </code>
                                 </p>
+                                <p class="mt-3">
+                                    <strong class="text-[#1C274C]"> EPSG:4326(lat, lng — Google Maps): </strong>
+                                    <code class="bg-gray-200 px-2 py-1 rounded"> 35.699738067, 51.338063171 </code>
+                                </p>
                                 <p class="mt-3 text-slate-400 text-xs">
-                                    Integers and decimals are both accepted. With Auto Detect, values within ±180 / ±90 are treated as EPSG:4326.
+                                    Integers and decimals are both accepted, separated by a comma or a space. With Auto
+                                    Detect, values within ±180 / ±90 are treated as EPSG:4326 in lng, lat order — pick
+                                    the lat, lng option for coordinates copied from Google Maps.
                                 </p>
                             </div>
                             <div class="flex justify-center">
@@ -244,6 +258,6 @@
     <script src="plugins/ol/ol.js"></script>
     <script src="plugins/jquery-3.7.1.min.js"></script>
     <script src="plugins/proj/proj4.js"></script>
-    <script src="assets/app.js?v=6"></script>
+    <script src="assets/app.js?v=7"></script>
 </body>
 </html>

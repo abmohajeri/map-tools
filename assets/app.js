@@ -22,14 +22,15 @@ $(function () {
     // Output precision: ~1 mm in degrees (4326) and ~0.1 mm in meters (3857).
     const OUTPUT_DECIMALS = { 'EPSG:3857': 4, 'EPSG:4326': 8 };
 
-    // CARTO Voyager basemap. This OpenLayers build doesn't expand the {r} retina
-    // token, so resolve it ourselves from the device pixel ratio (@2x on HiDPI).
-    const HIDPI = window.devicePixelRatio > 1;
-    const BASE_TILE_URL =
-        'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}' + (HIDPI ? '@2x' : '') + '.png';
-    const BASE_TILE_ATTRIBUTION =
-        '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
-        '© <a href="https://carto.com/attributions">CARTO</a>';
+    // Esri World Light Gray Canvas basemap: minimal, and needs no API key. The base
+    // service has only land/water and country names; city and street names come from
+    // the separate Reference service, drawn on top. Esri orders tiles as {z}/{y}/{x};
+    // native tiles stop at z16 in many regions (deeper levels return "Map data not yet
+    // available"), so OpenLayers upscales past that.
+    const BASE_TILE_URLS = ['World_Light_Gray_Base', 'World_Light_Gray_Reference'].map(function (service) {
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/' + service + '/MapServer/tile/{z}/{y}/{x}';
+    });
+    const BASE_TILE_MAX_ZOOM = 16;
 
     /* ----------------------------------------------------------------- *
      * Shared state
@@ -143,20 +144,17 @@ $(function () {
     function createMap(target, source) {
         const map = new ol.Map({
             target: target,
-            layers: [
-                new ol.layer.Tile({
+            layers: BASE_TILE_URLS.map(function (url) {
+                return new ol.layer.Tile({
                     source: new ol.source.XYZ({
-                        url: BASE_TILE_URL,
-                        attributions: BASE_TILE_ATTRIBUTION,
+                        url: url,
                         // Request tiles with CORS so OpenLayers' canvas stays untainted.
-                        // CARTO serves Access-Control-Allow-Origin: *.
+                        // Esri serves Access-Control-Allow-Origin: *.
                         crossOrigin: 'anonymous',
-                        tilePixelRatio: HIDPI ? 2 : 1,
-                        maxZoom: 20
+                        maxZoom: BASE_TILE_MAX_ZOOM
                     })
-                }),
-                new ol.layer.Vector({ source: source, style: vectorStyle() })
-            ],
+                });
+            }).concat(new ol.layer.Vector({source: source, style: vectorStyle()})),
             view: new ol.View({
                 center: ol.proj.fromLonLat(MAP_CENTER),
                 zoom: DEFAULT_ZOOM,
@@ -178,9 +176,14 @@ $(function () {
 
     // Build an OL geometry from a plain coordinate array, inferring the type
     // from its nesting depth: [x,y] Point, [[x,y]] LineString, [[[x,y]]] Polygon,
-    // [[[[x,y]]]] MultiPolygon.
+    // [[[[x,y]]]] MultiPolygon. Four bare numbers are a bbox [xmin, ymin, xmax, ymax].
     function geometryFromArray(coordinates) {
         if (!Array.isArray(coordinates)) throw new Error('Not an array');
+        if (coordinates.length === 4 && coordinates.every(function (c) {
+            return typeof c === 'number';
+        })) {
+            return ol.geom.Polygon.fromExtent(coordinates);
+        }
         if (typeof coordinates[0] === 'number') return new ol.geom.Point(coordinates);
         if (typeof coordinates[0][0] === 'number') return new ol.geom.LineString(coordinates);
         if (typeof coordinates[0][0][0] === 'number') return new ol.geom.Polygon(coordinates);
@@ -237,6 +240,16 @@ $(function () {
             ? geojsonFormat.writeFeatureObject(features[0])
             : geojsonFormat.writeFeaturesObject(features);
         return collapsePairs(JSON.stringify(obj, null, 2));
+    }
+
+    // Combined extent as [xmin, ymin, xmax, ymax], the ST_MakeEnvelope argument
+    // order. Clones from transformedClones are already rounded, so this is too.
+    function toExtentText(features) {
+        const extent = ol.extent.createEmpty();
+        features.forEach(function (feature) {
+            ol.extent.extend(extent, feature.getGeometry().getExtent());
+        });
+        return JSON.stringify(extent).replaceAll(',', ', ');
     }
 
     /* ----------------------------------------------------------------- *
@@ -323,6 +336,93 @@ $(function () {
         downloadText(this.getAttribute('data-filename') || 'geometry.txt', code.innerText);
     });
 
+    /* ----------------------------------------------------------------- *
+     * Share links. The geometry travels in the URL hash, so it is never sent
+     * to a server; it is deflate-compressed and base64url-encoded to keep
+     * links short. Opening a link shows the geometry in the Viewer.
+     * ----------------------------------------------------------------- */
+    // Longer URLs break in some browsers and chat apps; Download covers those.
+    const SHARE_MAX_LENGTH = 60000;
+
+    // { text, type, projection } behind the Share button currently on screen.
+    let currentShare = null;
+
+    // A Share button for `share`, the Viewer input that reproduces the geometry:
+    // its text plus the Input Type and Input Projection to read it with.
+    function shareButtonHtml(share) {
+        currentShare = share;
+        return '<button class="share-btn shrink-0 text-sm text-white bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded cursor-pointer">' +
+            'Share link</button>';
+    }
+
+    // An output title with a Share button on its right.
+    function shareableTitleHtml(title, share) {
+        return '<div class="flex items-start justify-between gap-2">' +
+            '<h3 class="text-xl text-[#1C274C] font-bold mb-1">' + escapeHtml(title) + '</h3>' +
+            shareButtonHtml(share) + '</div>';
+    }
+
+    function deflateToBase64Url(text) {
+        const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+        return new Response(stream).arrayBuffer().then(function (buffer) {
+            let binary = '';
+            new Uint8Array(buffer).forEach(function (byte) {
+                binary += String.fromCharCode(byte);
+            });
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        });
+    }
+
+    function inflateFromBase64Url(encoded) {
+        const binary = atob(encoded.replace(/-/g, '+').replace(/_/g, '/'));
+        const bytes = Uint8Array.from(binary, function (ch) {
+            return ch.charCodeAt(0);
+        });
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+        return new Response(stream).text();
+    }
+
+    function buildShareLink(share) {
+        return deflateToBase64Url(share.text).then(function (data) {
+            const params = new URLSearchParams({type: share.type, proj: share.projection, data: data});
+            return location.href.split('#')[0] + '#' + params.toString();
+        });
+    }
+
+    $(document).on('click', '.share-btn', function () {
+        const button = this;
+        hideError();
+        buildShareLink(currentShare).then(function (link) {
+            if (link.length > SHARE_MAX_LENGTH) {
+                showError('This geometry is too large for a share link (' + Math.round(link.length / 1000) +
+                    ' KB). Use Download instead.');
+                return;
+            }
+            copyText(link).then(function () {
+                button.innerText = 'Link copied!';
+                setTimeout(function () {
+                    button.innerText = 'Share link';
+                }, 1500);
+            }).catch(function () {
+                window.prompt('Copy this link:', link);
+            });
+        }).catch(function (e) {
+            console.error(e);
+            showError('Could not create a share link in this browser.');
+        });
+    });
+
+    function openShareLink() {
+        const params = new URLSearchParams(location.hash.slice(1));
+        if (!params.get('data')) return;
+        inflateFromBase64Url(params.get('data')).then(function (text) {
+            window.mapTools.viewer.showInput(text, params.get('type'), params.get('proj'));
+        }).catch(function (e) {
+            console.error(e);
+            showError('This share link is broken or incomplete.');
+        });
+    }
+
     $('.tab-link').on('click', resetUI);
 
     $('.clear-map').on('click', function () {
@@ -383,6 +483,13 @@ $(function () {
         let lastFeature = null;
         let lastType = null;
 
+        // Clear button and tab switches clear the source; forget the drawn feature
+        // too, or changing an output selector would bring its output back.
+        extractorSource.on('clear', function () {
+            lastFeature = null;
+            lastType = null;
+        });
+
         function setDrawType(type) {
             if (drawInteraction) {
                 map.removeInteraction(drawInteraction);
@@ -439,11 +546,19 @@ $(function () {
                 filename = 'geometry.json';
             }
 
+            // BBox also gets its bare extent alongside the polygon output.
+            const extentHtml = lastType === 'BBox'
+                ? '<h4 class="text-sm text-[#1C274C] font-bold mt-4">Extent [xmin, ymin, xmax, ymax]</h4>' +
+                copyBlock(toExtentText(clones), 'json', 'bbox.json')
+                : '';
+
+            // The link shares exactly this output; the Viewer reads all three formats.
             showOutput(
-                '<h3 class="text-xl text-[#1C274C] font-bold mb-1">Drawn Geometry (' +
-                    escapeHtml(lastType) + ' in ' + escapeHtml(targetProjection) + ')</h3>' +
+                shareableTitleHtml('Drawn Geometry (' + lastType + ' in ' + targetProjection + ')',
+                    {text: text, type: exportType, projection: targetProjection}) +
                 statsRowHtml(lastFeature.getGeometry()) +
-                copyBlock(text, language, filename)
+                copyBlock(text, language, filename) +
+                extentHtml
             );
         }
 
@@ -550,31 +665,116 @@ $(function () {
     function initViewer() {
         const map = createMap('viewer-map', viewerSource);
         const viewProjection = map.getView().getProjection();
+        const wkbFormat = new ol.format.WKB();
+        // extractStyles: false keeps our own style (and skips fetching KML icon images).
+        const kmlFormat = new ol.format.KML({extractStyles: false});
+        const gpxFormat = new ol.format.GPX();
+
+        // An Error whose message is safe and useful to show the user as-is.
+        function inputError(message) {
+            const error = new Error(message);
+            error.isInputError = true;
+            return error;
+        }
 
         function detectFormat(input) {
+            if (input.startsWith('<')) return /<gpx[\s>]/i.test(input) ? 'gpx' : 'kml';
+            // Encoded polylines use only ASCII 63–126: no digits, spaces, commas,
+            // quotes or parentheses, so WKT/WKB/JSON never look like one.
+            if (/^[\x3F-\x7E]+$/.test(input)) return 'polyline';
+            // Hex WKB/EWKB, as printed by PostGIS; the first byte is the byte order.
+            if (/^0[01](?:[0-9a-f]{2})+$/i.test(input)) return 'wkb';
             if (input.startsWith('{')) return 'geojson';
             if (input.startsWith('[')) return 'array';
             return 'wkt';
+        }
+
+        function withinLonLat(extent) {
+            return extent[0] >= -180 && extent[2] <= 180 && extent[1] >= -90 && extent[3] <= 90;
         }
 
         // Coordinates that all fit within lon/lat bounds are almost certainly
         // EPSG:4326 — Web Mercator values within ±180 m / ±90 m of the origin
         // (middle of the Gulf of Guinea) don't occur in practice.
         function detectProjection(features) {
-            const withinLonLat = features.every(function (feature) {
-                const e = feature.getGeometry().getExtent();
-                return e[0] >= -180 && e[2] <= 180 && e[1] >= -90 && e[3] <= 90;
+            const allLonLat = features.every(function (feature) {
+                return withinLonLat(feature.getGeometry().getExtent());
             });
-            return withinLonLat ? PROJ.WGS84 : PROJ.MERCATOR;
+            return allLonLat ? PROJ.WGS84 : PROJ.MERCATOR;
         }
 
-        function renderViewerOutput(features, dataProjection) {
+        // Maps a PostGIS SRID onto one of the supported projections. SRID 0 (or
+        // none) means "unknown", which leaves the choice to auto-detection.
+        function sridProjection(srid) {
+            if (!srid) return null;
+            const projection = ol.proj.get('EPSG:' + srid);
+            if (projection && ol.proj.equivalent(projection, ol.proj.get(PROJ.WGS84))) return PROJ.WGS84;
+            if (projection && ol.proj.equivalent(projection, ol.proj.get(PROJ.MERCATOR))) return PROJ.MERCATOR;
+            throw inputError('Unsupported SRID ' + srid + '. Only 4326 and 3857 are supported.');
+        }
+
+        // EWKB sets the 0x20000000 flag on the geometry type and stores the SRID in
+        // the next 4 bytes, in the byte order given by the first byte (01 = little).
+        function ewkbSrid(hex) {
+            const littleEndian = hex.slice(0, 2) === '01';
+            const uint32 = function (offset) {
+                const bytes = hex.slice(offset, offset + 8).match(/../g);
+                return parseInt((littleEndian ? bytes.reverse() : bytes).join(''), 16);
+            };
+            return uint32(2) & 0x20000000 ? uint32(10) : null;
+        }
+
+        // Encoded polylines (Google, OSRM, …) usually use precision 5; Valhalla and
+        // some others use 6. Precision-6 data decoded as 5 comes out 10× too large,
+        // so fall back to 6 when precision 5 doesn't fit lon/lat bounds.
+        function decodePolyline(input) {
+            for (const factor of [1e5, 1e6]) {
+                const geometry = new ol.format.Polyline({factor: factor}).readGeometry(input);
+                if (geometry.getCoordinates().length && withinLonLat(geometry.getExtent())) return geometry;
+            }
+            throw inputError('Could not decode that encoded polyline.');
+        }
+
+        // Parses `input` as `format`. Returns the features plus the projection the
+        // input itself declares (an SRID, or a lon/lat-only format), else null.
+        function readInput(input, format) {
+            if (format === 'geojson') {
+                return {features: geojsonFormat.readFeatures(input), projection: null};
+            }
+            if (format === 'array') {
+                return {features: [new ol.Feature(geometryFromArray(JSON.parse(input)))], projection: null};
+            }
+            if (format === 'kml') return {features: kmlFormat.readFeatures(input), projection: PROJ.WGS84};
+            if (format === 'gpx') return {features: gpxFormat.readFeatures(input), projection: PROJ.WGS84};
+            if (format === 'polyline') {
+                return {features: [new ol.Feature(decodePolyline(input))], projection: PROJ.WGS84};
+            }
+            if (format === 'wkb') {
+                return {features: [wkbFormat.readFeature(input)], projection: sridProjection(ewkbSrid(input))};
+            }
+            // WKT, optionally with a PostGIS EWKT "SRID=4326;" prefix.
+            const srid = input.match(/^SRID=(\d+);\s*/i);
+            return {
+                features: [wktFormat.readFeature(srid ? input.slice(srid[0].length) : input)],
+                projection: srid ? sridProjection(Number(srid[1])) : null
+            };
+        }
+
+        // `share` is the input that was shown, so a share link reproduces it exactly.
+        function renderViewerOutput(features, dataProjection, share) {
             const clones = transformedClones(features, dataProjection);
             const blocks = [];
             const arrayText = toArrayText(clones);
             if (arrayText) blocks.push({ label: 'Array', language: 'json', text: arrayText, filename: 'geometry.json' });
             blocks.push({ label: 'WKT', language: 'wkt', text: toWktText(clones), filename: 'geometry.wkt' });
             blocks.push({ label: 'GeoJSON', language: 'json', text: toGeoJsonText(clones), filename: 'geometry.geojson' });
+            // A lone point has no meaningful extent.
+            if (!(features.length === 1 && features[0].getGeometry().getType() === 'Point')) {
+                blocks.push({
+                    label: 'Extent [xmin, ymin, xmax, ymax]', language: 'json',
+                    text: toExtentText(clones), filename: 'bbox.json'
+                });
+            }
 
             const shown = features.slice(0, 10);
             const statsHtml = shown.map(function (feature, i) {
@@ -587,9 +787,8 @@ $(function () {
                 : '');
 
             showOutput(
-                '<h3 class="text-xl text-[#1C274C] font-bold mb-1">Geometry Info (' +
-                    features.length + ' feature' + (features.length > 1 ? 's' : '') + ', ' +
-                    escapeHtml(dataProjection) + ')</h3>' +
+                shareableTitleHtml('Geometry Info (' + features.length + ' feature' +
+                    (features.length > 1 ? 's' : '') + ', ' + dataProjection + ')', share) +
                 statsHtml +
                 blocks.map(function (b) {
                     return '<h4 class="text-sm text-[#1C274C] font-bold mt-4">' + b.label + '</h4>' +
@@ -610,20 +809,16 @@ $(function () {
             }
             try {
                 const format = typeSelection === 'auto' ? detectFormat(input) : typeSelection;
-                let features;
-                if (format === 'geojson') {
-                    features = geojsonFormat.readFeatures(input);
-                } else if (format === 'wkt') {
-                    features = [wktFormat.readFeature(input)];
-                } else {
-                    features = [new ol.Feature(geometryFromArray(JSON.parse(input)))];
-                }
-                features = features.filter(function (f) { return f && f.getGeometry(); });
+                const parsed = readInput(input, format);
+                const features = parsed.features.filter(function (f) {
+                    return f && f.getGeometry();
+                });
                 if (!features.length) throw new Error('No geometry found');
 
-                const dataProjection = projSelection === 'auto'
-                    ? detectProjection(features)
-                    : projSelection;
+                // An explicit selection wins; otherwise trust what the input declares.
+                const dataProjection = projSelection !== 'auto'
+                    ? projSelection
+                    : parsed.projection || detectProjection(features);
                 features.forEach(function (f) {
                     f.getGeometry().transform(dataProjection, viewProjection);
                 });
@@ -631,10 +826,12 @@ $(function () {
                 viewerSource.clear();
                 viewerSource.addFeatures(features);
                 map.getView().fit(viewerSource.getExtent(), FIT_OPTIONS);
-                renderViewerOutput(features, dataProjection);
+                // Share the resolved format and projection, not "auto", so the
+                // link opens the same way even if detection rules change.
+                renderViewerOutput(features, dataProjection, {text: input, type: format, projection: dataProjection});
             } catch (e) {
                 console.error(e);
-                showError('Please enter valid geometry!');
+                showError(e.isInputError ? e.message : 'Please enter valid geometry!');
             }
         });
 
@@ -683,16 +880,33 @@ $(function () {
             if (dt.files && dt.files[0]) importFile(dt.files[0]);
         });
 
-        return { map: map, source: viewerSource };
+        // Switches to the Viewer and shows `text` as if the user had pasted it with
+        // these selector values (used by share links). Unknown values fall back to auto.
+        function showInput(text, type, projection) {
+            document.querySelector('[data-dui-tab-target="geometry-tab"]').click();
+            $geometryInput.val(text);
+            [['#viewer-type-selector', type], ['#viewer-projection-selector', projection]].forEach(function (pair) {
+                const $select = $(pair[0]).val(pair[1]);
+                if ($select.val() === null) $select.val('auto');
+            });
+            // The tab was hidden until now; let OpenLayers measure it before fitting.
+            map.updateSize();
+            $('#show-viewer-map').trigger('click');
+        }
+
+        return {map: map, source: viewerSource, showInput: showInput};
     }
 
     /* ================================================================= *
      * Coordinate Converter
      * ================================================================= */
     function initConverter() {
-        // Two numbers separated by a comma. Each may be an integer or decimal,
-        // optionally signed, with flexible spacing around the comma.
-        const COORD_RE = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/;
+        // Two numbers separated by a comma and/or spaces. Each may be an integer
+        // or decimal, optionally signed.
+        const COORD_RE = /^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/;
+        // Selector value for lon/lat typed in "lat, lng" order, as Google Maps
+        // and most phones copy it.
+        const WGS84_LAT_LNG = 'EPSG:4326:lat-lng';
 
         function convert() {
             const input = $('#input-coordinates').val().trim();
@@ -707,10 +921,13 @@ $(function () {
                 return;
             }
 
-            const x = parseFloat(match[1]);
-            const y = parseFloat(match[2]);
+            let x = parseFloat(match[1]);
+            let y = parseFloat(match[2]);
 
-            if (sourceProjection === 'auto') {
+            if (sourceProjection === WGS84_LAT_LNG) {
+                [x, y] = [y, x];
+                sourceProjection = PROJ.WGS84;
+            } else if (sourceProjection === 'auto') {
                 sourceProjection = (Math.abs(x) <= 180 && Math.abs(y) <= 90)
                     ? PROJ.WGS84
                     : PROJ.MERCATOR;
@@ -748,4 +965,8 @@ $(function () {
         viewer: initViewer()
     };
     initConverter();
+
+    openShareLink();
+    // A share link pasted into an already-open tab changes only the hash.
+    $(window).on('hashchange', openShareLink);
 });
